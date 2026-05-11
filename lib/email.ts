@@ -120,12 +120,14 @@ export async function sendEmail(payload: SendPayload): Promise<void> {
     shortDesc: payload.shortDesc,
     longDesc: payload.longDesc,
     priceLine,
+    sizes: payload.sizes,
     photoCids,
   });
   const text = renderEmailPlain({
     shortDesc: payload.shortDesc,
     longDesc: payload.longDesc,
     priceLine,
+    sizes: payload.sizes,
     photoCount: attachments.length,
   });
 

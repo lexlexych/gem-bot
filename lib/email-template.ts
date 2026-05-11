@@ -4,6 +4,7 @@ export type EmailTemplateData = {
   shortDesc: string;
   longDesc: string;
   priceLine: string | null;
+  sizes: readonly string[];
   photoCids: string[];
 };
 
@@ -39,6 +40,25 @@ function renderPrice(priceLine: string | null): string {
                    font-size:16px; font-weight:700; letter-spacing:0.01em;">
         ${safe}
       </span>
+    </td></tr>`;
+}
+
+function renderSizes(sizes: readonly string[]): string {
+  if (!sizes || sizes.length === 0) return '';
+  const chips = sizes
+    .map(
+      (s) => `<span style="display:inline-block; padding:6px 12px; margin:0 6px 6px 0;
+                   background:#f3f4f6; color:${COLOR_TEXT};
+                   border:1px solid ${COLOR_BORDER}; border-radius:8px;
+                   font-size:13px; font-weight:600; letter-spacing:0.03em;">${escapeHtml(s)}</span>`
+    )
+    .join('');
+  return `
+    <tr><td style="padding:18px 28px 0;">
+      <div style="font-size:11px; color:${COLOR_MUTED}; text-transform:uppercase; letter-spacing:0.08em; font-weight:600; margin-bottom:8px;">
+        Доступные размеры
+      </div>
+      <div>${chips}</div>
     </td></tr>`;
 }
 
@@ -94,6 +114,7 @@ export function renderEmailHtml(data: EmailTemplateData): string {
 
         ${renderTitle(data.shortDesc)}
         ${renderPrice(data.priceLine)}
+        ${renderSizes(data.sizes)}
         ${renderLong(data.longDesc)}
         ${renderGallery(data.photoCids)}
 
@@ -114,6 +135,10 @@ export function renderEmailPlain(data: Omit<EmailTemplateData, 'photoCids'> & { 
   if (data.priceLine) {
     if (lines.length) lines.push('');
     lines.push(data.priceLine);
+  }
+  if (data.sizes && data.sizes.length > 0) {
+    if (lines.length) lines.push('');
+    lines.push(`Доступные размеры: ${data.sizes.join(', ')}`);
   }
   if (data.longDesc.trim()) {
     if (lines.length) lines.push('');

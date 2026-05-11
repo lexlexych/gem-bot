@@ -10,6 +10,10 @@ type GalleryItem = {
 };
 
 type SendStatus = 'idle' | 'loading' | 'success' | 'error';
+type Mode = 'telegram' | 'email';
+
+const SIZE_OPTIONS = ['XS', 'S', 'M', 'L', 'XL', 'XXL'] as const;
+type SizeOption = (typeof SIZE_OPTIONS)[number];
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
@@ -28,81 +32,74 @@ export default function Page() {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [lbIndex, setLbIndex] = useState<number>(-1);
   const [isDragover, setIsDragover] = useState<boolean>(false);
-  const [urlFallback, setUrlFallback] = useState<{ visible: boolean; msg: string }>({
-    visible: false,
-    msg: '',
-  });
-  const [urlValue, setUrlValue] = useState<string>('');
   const [shortDesc, setShortDesc] = useState<string>('');
   const [longDesc, setLongDesc] = useState<string>('');
   const [priceValue, setPriceValue] = useState<string>('');
-  const [tgStatus, setTgStatus] = useState<SendStatus>('idle');
-  const [emailStatus, setEmailStatus] = useState<SendStatus>('idle');
+  const [selectedSizes, setSelectedSizes] = useState<Set<SizeOption>>(() => new Set());
+  const [mode, setMode] = useState<Mode>('telegram');
+  const [sendStatus, setSendStatus] = useState<SendStatus>('idle');
   const [toast, setToast] = useState<{ kind: ToastKind; message: string; key: number } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dragCounterRef = useRef<number>(0);
-  const urlInputRef = useRef<HTMLInputElement | null>(null);
 
   const showToast = useCallback((kind: ToastKind, message: string) => {
     setToast({ kind, message, key: Date.now() });
   }, []);
 
-  const submit = useCallback(
-    async (
-      endpoint: '/api/telegram' | '/api/email',
-      setStatus: (s: SendStatus) => void,
-      successMsg: string
-    ) => {
-      if (items.length === 0) {
-        showToast('error', 'Добавьте хотя бы одно фото');
-        return;
-      }
-      if (!shortDesc.trim()) {
-        showToast('error', 'Заполните короткое описание');
-        return;
-      }
-      setStatus('loading');
-      try {
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            shortDesc,
-            longDesc,
-            price: priceValue,
-            items: items.map(({ src, name }) => ({ src, name })),
-          }),
-        });
-        const data = await res.json().catch(() => ({ ok: false, error: 'Bad response' }));
-        if (res.ok && data.ok) {
-          setStatus('success');
-          showToast('success', successMsg);
-          setTimeout(() => setStatus('idle'), 2000);
-        } else {
-          setStatus('error');
-          showToast('error', data?.error || 'Ошибка отправки');
-          setTimeout(() => setStatus('idle'), 100);
-        }
-      } catch {
-        setStatus('error');
-        showToast('error', 'Сервис недоступен');
-        setTimeout(() => setStatus('idle'), 100);
-      }
-    },
-    [items, shortDesc, longDesc, priceValue, showToast]
-  );
+  const toggleSize = useCallback((size: SizeOption) => {
+    setSelectedSizes((prev) => {
+      const next = new Set(prev);
+      if (next.has(size)) next.delete(size);
+      else next.add(size);
+      return next;
+    });
+  }, []);
 
-  const handleSendTelegram = useCallback(
-    () => submit('/api/telegram', setTgStatus, 'Отправлено в Telegram'),
-    [submit]
-  );
-  const handleSendEmail = useCallback(
-    () => submit('/api/email', setEmailStatus, 'Письмо отправлено'),
-    [submit]
-  );
+  const handleSend = useCallback(async () => {
+    if (items.length === 0) {
+      showToast('error', 'Добавьте хотя бы одно фото');
+      return;
+    }
+    if (!shortDesc.trim()) {
+      showToast('error', 'Заполните заголовок');
+      return;
+    }
+    const endpoint = mode === 'email' ? '/api/email' : '/api/telegram';
+    const successMsg = mode === 'email' ? 'Письмо отправлено' : 'Отправлено в Telegram';
+    const sizes = SIZE_OPTIONS.filter((s) => selectedSizes.has(s));
 
-  // Pre-fill short/long из URL query params (Gemini подставляет через URL)
+    setSendStatus('loading');
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shortDesc,
+          longDesc,
+          price: priceValue,
+          sizes,
+          items: items.map(({ src, name }) => ({ src, name })),
+        }),
+      });
+      const data = await res.json().catch(() => ({ ok: false, error: 'Bad response' }));
+      if (res.ok && data.ok) {
+        setSendStatus('success');
+        showToast('success', successMsg);
+        setTimeout(() => setSendStatus('idle'), 2000);
+      } else {
+        setSendStatus('error');
+        showToast('error', data?.error || 'Ошибка отправки');
+        setTimeout(() => setSendStatus('idle'), 100);
+      }
+    } catch {
+      setSendStatus('error');
+      showToast('error', 'Сервис недоступен');
+      setTimeout(() => setSendStatus('idle'), 100);
+    }
+  }, [items, shortDesc, longDesc, priceValue, selectedSizes, mode, showToast]);
+
+  // Pre-fill из URL query params (Gemini подставляет через URL)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const p = new URLSearchParams(window.location.search);
@@ -110,6 +107,7 @@ export default function Page() {
     if (s !== null) setShortDesc(s);
     const l = p.get('long');
     if (l !== null) setLongDesc(l);
+    if (p.get('state') === 'email') setMode('email');
   }, []);
 
   // ===== Gallery state mutators =====
@@ -206,69 +204,6 @@ export default function Page() {
     e.target.value = '';
   };
 
-  // ===== Paste button =====
-  const handlePasteClick = async () => {
-    const nav = navigator as Navigator & {
-      clipboard?: Clipboard & { read?: () => Promise<ClipboardItem[]> };
-    };
-    if (!nav.clipboard || !nav.clipboard.read) {
-      setUrlFallback({
-        visible: true,
-        msg: 'В этом окружении нельзя читать буфер программно. Вставьте URL картинки или нажмите Ctrl+V прямо на странице:',
-      });
-      return;
-    }
-    try {
-      const clipItems = await nav.clipboard.read();
-      let added = 0;
-      for (const item of clipItems) {
-        for (const type of item.types) {
-          if (type.startsWith('image/')) {
-            const blob = await item.getType(type);
-            const src = await readBlobAsDataUrl(blob);
-            addItem({ id: uid(), src, name: '' });
-            added++;
-          }
-        }
-      }
-      if (added > 0) {
-        setUrlFallback({ visible: false, msg: '' });
-      } else {
-        setUrlFallback({
-          visible: true,
-          msg: 'В буфере нет изображения. Можно вставить URL картинки:',
-        });
-      }
-    } catch {
-      setUrlFallback({
-        visible: true,
-        msg: 'Не удалось прочитать буфер (canvas/iframe-окружение блокирует доступ). Вставьте URL картинки или нажмите Ctrl+V прямо на странице:',
-      });
-    }
-  };
-
-  // Auto-focus URL input when fallback appears
-  useEffect(() => {
-    if (urlFallback.visible) {
-      const t = setTimeout(() => urlInputRef.current?.focus(), 50);
-      return () => clearTimeout(t);
-    }
-  }, [urlFallback.visible]);
-
-  // ===== URL fallback handlers =====
-  const submitUrl = () => {
-    const url = urlValue.trim();
-    if (!url) return;
-    addFromUrl(url);
-    setUrlValue('');
-    setUrlFallback({ visible: false, msg: '' });
-  };
-
-  const closeUrlFallback = () => {
-    setUrlFallback({ visible: false, msg: '' });
-    setUrlValue('');
-  };
-
   // ===== Lightbox =====
   const openLightbox = (index: number) => setLbIndex(index);
   const closeLightbox = () => setLbIndex(-1);
@@ -336,47 +271,7 @@ export default function Page() {
                 <UploadIcon />
                 Загрузить
               </button>
-              <button type="button" className="btn btn--secondary" onClick={handlePasteClick}>
-                <ClipboardIcon />
-                Вставить
-              </button>
             </div>
-
-            {urlFallback.visible && (
-              <div className="url-fallback">
-                <button
-                  type="button"
-                  className="url-fallback-close"
-                  aria-label="Закрыть"
-                  onClick={closeUrlFallback}
-                >
-                  ×
-                </button>
-                <p className="url-fallback-msg">{urlFallback.msg}</p>
-                <div className="url-fallback-row">
-                  <input
-                    ref={urlInputRef}
-                    className="form-input"
-                    type="url"
-                    value={urlValue}
-                    placeholder="https://example.com/image.jpg"
-                    autoComplete="off"
-                    onChange={(e) => setUrlValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        submitUrl();
-                      } else if (e.key === 'Escape') {
-                        closeUrlFallback();
-                      }
-                    }}
-                  />
-                  <button type="button" className="btn" onClick={submitUrl}>
-                    Добавить
-                  </button>
-                </div>
-              </div>
-            )}
 
             <div
               className={`gallery-area${isDragover ? ' is-dragover' : ''}`}
@@ -387,7 +282,7 @@ export default function Page() {
             >
               <div className={`gallery-empty${items.length > 0 ? ' is-hidden' : ''}`}>
                 <PhotoIcon />
-                <p>Перетащите фото сюда, вставьте из буфера (Ctrl+V) или загрузите с компьютера</p>
+                <p>Перетащите фото сюда, нажмите Ctrl+V для вставки или загрузите с компьютера</p>
               </div>
               <div className="gallery-grid">
                 {items.map((it, idx) => (
@@ -430,7 +325,7 @@ export default function Page() {
 
             <div className="form-row">
               <label className="form-label" htmlFor="short-desc">
-                Короткое описание
+                Заголовок
               </label>
               <input
                 className="form-input"
@@ -444,7 +339,7 @@ export default function Page() {
 
             <div className="form-row">
               <label className="form-label" htmlFor="long-desc">
-                Длинное описание
+                Описание
               </label>
               <textarea
                 className="form-textarea"
@@ -479,27 +374,50 @@ export default function Page() {
               </div>
             </div>
 
+            <div className="form-row">
+              <span className="form-label">Доступные размеры</span>
+              <div className="sizes-grid" role="group" aria-label="Доступные размеры">
+                {SIZE_OPTIONS.map((size) => {
+                  const isActive = selectedSizes.has(size);
+                  return (
+                    <button
+                      key={size}
+                      type="button"
+                      className={`size-chip${isActive ? ' is-active' : ''}`}
+                      onClick={() => toggleSize(size)}
+                      aria-pressed={isActive}
+                    >
+                      {size}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div className="actions">
-              <button
-                type="button"
-                className="btn"
-                id="btn-tg"
-                onClick={handleSendTelegram}
-                disabled={tgStatus === 'loading'}
-              >
-                {tgStatus === 'loading' ? <SpinnerIcon /> : <TgIcon />}
-                {tgStatus === 'loading' ? 'Отправка…' : 'Отправить в TG'}
-              </button>
-              <button
-                type="button"
-                className="btn"
-                id="btn-email"
-                onClick={handleSendEmail}
-                disabled={emailStatus === 'loading'}
-              >
-                {emailStatus === 'loading' ? <SpinnerIcon /> : <EmailIcon />}
-                {emailStatus === 'loading' ? 'Отправка…' : 'Отправить Email'}
-              </button>
+              {mode === 'email' ? (
+                <button
+                  type="button"
+                  className="btn"
+                  id="btn-email"
+                  onClick={handleSend}
+                  disabled={sendStatus === 'loading'}
+                >
+                  {sendStatus === 'loading' ? <SpinnerIcon /> : <EmailIcon />}
+                  {sendStatus === 'loading' ? 'Отправка…' : 'Отправить Email'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn"
+                  id="btn-tg"
+                  onClick={handleSend}
+                  disabled={sendStatus === 'loading'}
+                >
+                  {sendStatus === 'loading' ? <SpinnerIcon /> : <TgIcon />}
+                  {sendStatus === 'loading' ? 'Отправка…' : 'Отправить в TG'}
+                </button>
+              )}
             </div>
           </div>
         </section>
@@ -585,23 +503,6 @@ function UploadIcon() {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="17 8 12 3 7 8" />
       <line x1="12" y1="3" x2="12" y2="15" />
-    </svg>
-  );
-}
-
-function ClipboardIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-      <rect x="8" y="2" width="8" height="4" rx="1" />
     </svg>
   );
 }

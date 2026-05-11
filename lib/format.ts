@@ -23,49 +23,64 @@ export function formatPriceLine(price: string): string | null {
   return `${formatted} €`;
 }
 
-export type CaptionParts = {
+export type MessageParts = {
   shortDesc: string;
   longDesc: string;
   priceLine: string | null;
+  sizes: readonly string[];
 };
 
 const TG_CAPTION_LIMIT = 1024;
 
-export function buildTelegramCaption(parts: CaptionParts): {
+function titleHtml(shortDesc: string): string {
+  const t = shortDesc.trim();
+  return t ? `<b>${escapeHtml(t)}</b>` : '';
+}
+
+function priceHtml(priceLine: string | null): string {
+  return priceLine ? `💶 <b>${escapeHtml(priceLine)}</b>` : '';
+}
+
+function sizesHtml(sizes: readonly string[]): string {
+  if (!sizes || sizes.length === 0) return '';
+  const chips = sizes.map((s) => `<code>${escapeHtml(s)}</code>`).join(' · ');
+  return `📐 <b>Размеры:</b> ${chips}`;
+}
+
+function longHtml(longDesc: string): string {
+  const t = longDesc.trim();
+  return t ? `<blockquote expandable>${escapeHtml(t)}</blockquote>` : '';
+}
+
+function composeText(parts: MessageParts, includeLong: boolean): string {
+  const title = titleHtml(parts.shortDesc);
+  const meta = [priceHtml(parts.priceLine), sizesHtml(parts.sizes)].filter(Boolean).join('\n');
+  const long = includeLong ? longHtml(parts.longDesc) : '';
+  return [title, meta, long].filter(Boolean).join('\n\n');
+}
+
+export function buildTelegramMessage(parts: MessageParts): string {
+  return composeText(parts, true);
+}
+
+export function buildTelegramCaption(parts: MessageParts): {
   caption: string;
   overflow: string | null;
 } {
-  const { shortDesc, longDesc, priceLine } = parts;
-
-  const titleHtml = shortDesc.trim() ? `<b>${escapeHtml(shortDesc.trim())}</b>` : '';
-  const priceHtml = priceLine ? escapeHtml(priceLine) : '';
-  const longHtml = longDesc.trim() ? `<i>${escapeHtml(longDesc.trim())}</i>` : '';
-
-  const fullParts = [titleHtml, priceHtml, longHtml].filter(Boolean);
-  const full = fullParts.join('\n');
-
+  const full = composeText(parts, true);
   if (full.length <= TG_CAPTION_LIMIT) {
     return { caption: full, overflow: null };
   }
 
-  const minParts = [titleHtml, priceHtml].filter(Boolean);
-  const minCaption = minParts.join('\n');
+  const withoutLong = composeText(parts, false);
+  const long = longHtml(parts.longDesc) || null;
 
-  if (minCaption.length <= TG_CAPTION_LIMIT) {
-    return { caption: minCaption, overflow: longHtml || null };
+  if (withoutLong.length <= TG_CAPTION_LIMIT) {
+    return { caption: withoutLong, overflow: long };
   }
 
   return {
-    caption: minCaption.slice(0, TG_CAPTION_LIMIT - 1) + '…',
-    overflow: longHtml || null,
+    caption: withoutLong.slice(0, TG_CAPTION_LIMIT - 1) + '…',
+    overflow: long,
   };
-}
-
-export function buildTelegramMessage(parts: CaptionParts): string {
-  const { shortDesc, longDesc, priceLine } = parts;
-  const out: string[] = [];
-  if (shortDesc.trim()) out.push(`<b>${escapeHtml(shortDesc.trim())}</b>`);
-  if (priceLine) out.push(escapeHtml(priceLine));
-  if (longDesc.trim()) out.push(`<i>${escapeHtml(longDesc.trim())}</i>`);
-  return out.join('\n');
 }

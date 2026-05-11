@@ -167,18 +167,16 @@ export async function sendToTelegram(payload: SendPayload): Promise<void> {
   getEnv();
 
   const priceLine = formatPriceLine(payload.price);
-  const { caption, overflow } = buildTelegramCaption({
+  const messageParts = {
     shortDesc: payload.shortDesc,
     longDesc: payload.longDesc,
     priceLine,
-  });
+    sizes: payload.sizes,
+  };
+  const { caption, overflow } = buildTelegramCaption(messageParts);
 
   if (payload.items.length === 0) {
-    const text = buildTelegramMessage({
-      shortDesc: payload.shortDesc,
-      longDesc: payload.longDesc,
-      priceLine,
-    });
+    const text = buildTelegramMessage(messageParts);
     if (!text) throw new Error('Nothing to send');
     await sendMessage(text);
     return;
