@@ -18,28 +18,48 @@ function getEnv(): EmailEnv {
   const host = process.env.SMTP_HOST;
   const portStr = process.env.SMTP_PORT;
   const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
+  // Принимаем оба имени: SMTP_PASSWORD (на Vercel) и SMTP_PASS (локально).
+  const pass = process.env.SMTP_PASSWORD || process.env.SMTP_PASS;
   const from = process.env.EMAIL_FROM;
   const toRaw = process.env.EMAIL_TO;
 
-  if (!host || !portStr || !user || !pass || !from || !toRaw) {
+  const missing: string[] = [];
+  if (!host) missing.push('SMTP_HOST');
+  if (!portStr) missing.push('SMTP_PORT');
+  if (!user) missing.push('SMTP_USER');
+  if (!pass) missing.push('SMTP_PASSWORD (или SMTP_PASS)');
+  if (!from) missing.push('EMAIL_FROM');
+  if (!toRaw) missing.push('EMAIL_TO');
+  if (missing.length > 0) {
+    console.error('[email] missing env:', missing.join(', '));
     throw new Error('Server is not configured');
   }
   const port = Number(portStr);
   if (!Number.isFinite(port) || port <= 0) {
+    console.error('[email] invalid SMTP_PORT:', portStr);
     throw new Error('Server is not configured');
   }
   const secure = (process.env.SMTP_SECURE ?? 'true').toLowerCase() !== 'false';
-  const to = toRaw
+  const to = (toRaw as string)
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
   if (to.length === 0) {
+    console.error('[email] EMAIL_TO is empty after parse');
     throw new Error('Server is not configured');
   }
   const subjectPrefix = process.env.EMAIL_SUBJECT_PREFIX?.trim() || '';
 
-  return { host, port, secure, user, pass, from, to, subjectPrefix };
+  return {
+    host: host as string,
+    port,
+    secure,
+    user: user as string,
+    pass: pass as string,
+    from: from as string,
+    to,
+    subjectPrefix,
+  };
 }
 
 function mimeToExt(mime: string): string {
