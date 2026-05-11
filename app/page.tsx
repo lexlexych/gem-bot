@@ -1,12 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Toast, { ToastKind } from './components/Toast';
 
 type GalleryItem = {
   id: string;
   src: string;
   name: string;
 };
+
+type SendStatus = 'idle' | 'loading' | 'success' | 'error';
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
@@ -32,10 +35,72 @@ export default function Page() {
   const [urlValue, setUrlValue] = useState<string>('');
   const [shortDesc, setShortDesc] = useState<string>('');
   const [longDesc, setLongDesc] = useState<string>('');
+  const [priceValue, setPriceValue] = useState<string>('');
+  const [tgStatus, setTgStatus] = useState<SendStatus>('idle');
+  const [emailStatus, setEmailStatus] = useState<SendStatus>('idle');
+  const [toast, setToast] = useState<{ kind: ToastKind; message: string; key: number } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dragCounterRef = useRef<number>(0);
   const urlInputRef = useRef<HTMLInputElement | null>(null);
+
+  const showToast = useCallback((kind: ToastKind, message: string) => {
+    setToast({ kind, message, key: Date.now() });
+  }, []);
+
+  const submit = useCallback(
+    async (
+      endpoint: '/api/telegram' | '/api/email',
+      setStatus: (s: SendStatus) => void,
+      successMsg: string
+    ) => {
+      if (items.length === 0) {
+        showToast('error', 'Добавьте хотя бы одно фото');
+        return;
+      }
+      if (!shortDesc.trim()) {
+        showToast('error', 'Заполните короткое описание');
+        return;
+      }
+      setStatus('loading');
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            shortDesc,
+            longDesc,
+            price: priceValue,
+            items: items.map(({ src, name }) => ({ src, name })),
+          }),
+        });
+        const data = await res.json().catch(() => ({ ok: false, error: 'Bad response' }));
+        if (res.ok && data.ok) {
+          setStatus('success');
+          showToast('success', successMsg);
+          setTimeout(() => setStatus('idle'), 2000);
+        } else {
+          setStatus('error');
+          showToast('error', data?.error || 'Ошибка отправки');
+          setTimeout(() => setStatus('idle'), 100);
+        }
+      } catch {
+        setStatus('error');
+        showToast('error', 'Сервис недоступен');
+        setTimeout(() => setStatus('idle'), 100);
+      }
+    },
+    [items, shortDesc, longDesc, priceValue, showToast]
+  );
+
+  const handleSendTelegram = useCallback(
+    () => submit('/api/telegram', setTgStatus, 'Отправлено в Telegram'),
+    [submit]
+  );
+  const handleSendEmail = useCallback(
+    () => submit('/api/email', setEmailStatus, 'Письмо отправлено'),
+    [submit]
+  );
 
   // Pre-fill short/long из URL query params (Gemini подставляет через URL)
   useEffect(() => {
@@ -405,6 +470,8 @@ export default function Page() {
                   min="0"
                   placeholder="0.00"
                   inputMode="decimal"
+                  value={priceValue}
+                  onChange={(e) => setPriceValue(e.target.value)}
                 />
                 <span className="price-symbol" aria-hidden="true">
                   €
@@ -413,18 +480,39 @@ export default function Page() {
             </div>
 
             <div className="actions">
-              <button type="button" className="btn" id="btn-tg">
-                <TgIcon />
-                Отправить в TG
+              <button
+                type="button"
+                className="btn"
+                id="btn-tg"
+                onClick={handleSendTelegram}
+                disabled={tgStatus === 'loading'}
+              >
+                {tgStatus === 'loading' ? <SpinnerIcon /> : <TgIcon />}
+                {tgStatus === 'loading' ? 'Отправка…' : 'Отправить в TG'}
               </button>
-              <button type="button" className="btn" id="btn-email">
-                <EmailIcon />
-                Отправить Email
+              <button
+                type="button"
+                className="btn"
+                id="btn-email"
+                onClick={handleSendEmail}
+                disabled={emailStatus === 'loading'}
+              >
+                {emailStatus === 'loading' ? <SpinnerIcon /> : <EmailIcon />}
+                {emailStatus === 'loading' ? 'Отправка…' : 'Отправить Email'}
               </button>
             </div>
           </div>
         </section>
       </div>
+
+      {toast && (
+        <Toast
+          key={toast.key}
+          kind={toast.kind}
+          message={toast.message}
+          onClose={() => setToast(null)}
+        />
+      )}
 
       {/* Lightbox */}
       {lbItem && (
@@ -615,6 +703,21 @@ function EmailIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 4.24-8 5-8-5V6l8 5 8-5v2.24z" />
+    </svg>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg className="spinner" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2.5" />
+      <path
+        d="M21 12a9 9 0 0 1-9 9"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        fill="none"
+      />
     </svg>
   );
 }
